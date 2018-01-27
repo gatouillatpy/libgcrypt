@@ -161,16 +161,25 @@ nist_generate_key (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
     random_level = GCRY_VERY_STRONG_RANDOM;
 
   /* Generate a secret.  */
-  if (ctx->dialect == ECC_DIALECT_ED25519 || (flags & PUBKEY_FLAG_DJB_TWEAK))
+  if (ctx->dialect == ECC_DIALECT_ED25519 || ctx->dialect == ECC_DIALECT_ED448 || (flags & PUBKEY_FLAG_DJB_TWEAK))
     {
       char *rndbuf;
 
-      sk->d = mpi_snew (256);
-      rndbuf = _gcry_random_bytes_secure (32, random_level);
-      rndbuf[0] &= 0x7f;  /* Clear bit 255. */
-      rndbuf[0] |= 0x40;  /* Set bit 254.   */
-      rndbuf[31] &= 0xf8; /* Clear bits 2..0 so that d mod 8 == 0  */
-      _gcry_mpi_set_buffer (sk->d, rndbuf, 32, 0);
+      if (ctx->dialect == ECC_DIALECT_ED25519) {
+        sk->d = mpi_snew (256);
+        rndbuf = _gcry_random_bytes_secure (32, random_level);
+        rndbuf[0] &= 0x7f;  /* Clear bit 255. */
+        rndbuf[0] |= 0x40;  /* Set bit 254.   */
+        rndbuf[31] &= 0xf8; /* Clear bits 2..0 so that d mod 8 == 0  */
+        _gcry_mpi_set_buffer (sk->d, rndbuf, 32, 0);
+      } else if (ctx->dialect == ECC_DIALECT_ED448) {
+        sk->d = mpi_snew (456);
+        rndbuf = _gcry_random_bytes_secure (57, random_level);
+        rndbuf[0] &= 0x7f;  /* Clear bit 455. */
+        rndbuf[0] |= 0x40;  /* Set bit 454.   */
+        rndbuf[56] &= 0xf8; /* Clear bits 2..0 so that d mod 8 == 0  */
+        _gcry_mpi_set_buffer (sk->d, rndbuf, 57, 0);
+      }
       xfree (rndbuf);
     }
   else
@@ -209,7 +218,7 @@ nist_generate_key (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
    * possibilities without any loss of security.  Note that we don't
    * do that for Ed25519 so that we do not violate the special
    * construction of the secret key.  */
-  if (r_y == NULL || E->dialect == ECC_DIALECT_ED25519)
+  if (r_y == NULL || E->dialect == ECC_DIALECT_ED25519 || E->dialect == ECC_DIALECT_ED448)
     point_set (&sk->Q, &Q);
   else
     {
@@ -431,7 +440,7 @@ check_secret_key (ECC_secret_key *sk, mpi_ec_t ec, int flags)
     }
 
   /* Check order of curve.  */
-  if (sk->E.dialect != ECC_DIALECT_ED25519 && !(flags & PUBKEY_FLAG_DJB_TWEAK))
+  if (sk->E.dialect != ECC_DIALECT_ED25519 && sk->E.dialect != ECC_DIALECT_ED448 && !(flags & PUBKEY_FLAG_DJB_TWEAK))
     {
       _gcry_mpi_ec_mul_point (&Q, sk->E.n, &sk->E.G, ec);
       if (mpi_cmp_ui (Q.z, 0))
@@ -612,7 +621,7 @@ ecc_generate (const gcry_sexp_t genparms, gcry_sexp_t *r_skey)
         log_fatal ("ecgen: Failed to get affine coordinates for %s\n", "G");
       base = _gcry_ecc_ec2os (Gx, Gy, sk.E.p);
     }
-  if ((sk.E.dialect == ECC_DIALECT_ED25519 || E.model == MPI_EC_MONTGOMERY)
+  if ((sk.E.dialect == ECC_DIALECT_ED25519 || sk.E.dialect == ECC_DIALECT_ED448 || E.model == MPI_EC_MONTGOMERY)
       && !(flags & PUBKEY_FLAG_NOCOMP))
     {
       unsigned char *encpk;
@@ -801,14 +810,8 @@ ecc_check_secret_key (gcry_sexp_t keyparms)
      FIXME: This is a crude hacks.  We need to fix that.  */
   if (!curvename)
     {
-      sk.E.model = ((flags & PUBKEY_FLAG_EDDSA)
-               ? MPI_EC_EDWARDS
-               : MPI_EC_WEIERSTRASS);
-      sk.E.dialect = ((flags & PUBKEY_FLAG_EDDSA)
-                      ? ECC_DIALECT_ED25519
-                      : ECC_DIALECT_STANDARD);
-      if (!sk.E.h)
-	sk.E.h = mpi_const (MPI_C_ONE);
+      rc = GPG_ERR_BUG;
+      goto leave;
     }
   if (DBG_CIPHER)
     {
@@ -839,7 +842,7 @@ ecc_check_secret_key (gcry_sexp_t keyparms)
   if (mpi_q)
     {
       point_init (&sk.Q);
-      if (ec->dialect == ECC_DIALECT_ED25519)
+      if (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448)
         rc = _gcry_ecc_eddsa_decodepoint (mpi_q, ec, &sk.Q, NULL, NULL);
       else if (ec->model == MPI_EC_MONTGOMERY)
         rc = _gcry_ecc_mont_decodepoint (mpi_q, ec, &sk.Q);
@@ -938,14 +941,8 @@ ecc_sign (gcry_sexp_t *r_sig, gcry_sexp_t s_data, gcry_sexp_t keyparms)
      FIXME: This is a crude hacks.  We need to fix that.  */
   if (!curvename)
     {
-      sk.E.model = ((ctx.flags & PUBKEY_FLAG_EDDSA)
-                    ? MPI_EC_EDWARDS
-                    : MPI_EC_WEIERSTRASS);
-      sk.E.dialect = ((ctx.flags & PUBKEY_FLAG_EDDSA)
-                      ? ECC_DIALECT_ED25519
-                      : ECC_DIALECT_STANDARD);
-      if (!sk.E.h)
-	sk.E.h = mpi_const (MPI_C_ONE);
+      rc = GPG_ERR_BUG;
+      goto leave;
     }
   if (DBG_CIPHER)
     {
@@ -1106,14 +1103,8 @@ ecc_verify (gcry_sexp_t s_sig, gcry_sexp_t s_data, gcry_sexp_t s_keyparms)
      FIXME: This is a crude hacks.  We need to fix that.  */
   if (!curvename)
     {
-      pk.E.model = ((sigflags & PUBKEY_FLAG_EDDSA)
-                    ? MPI_EC_EDWARDS
-                    : MPI_EC_WEIERSTRASS);
-      pk.E.dialect = ((sigflags & PUBKEY_FLAG_EDDSA)
-                      ? ECC_DIALECT_ED25519
-                      : ECC_DIALECT_STANDARD);
-      if (!pk.E.h)
-	pk.E.h = mpi_const (MPI_C_ONE);
+      rc = GPG_ERR_BUG;
+      goto leave;
     }
 
   if (DBG_CIPHER)
@@ -1159,7 +1150,7 @@ ecc_verify (gcry_sexp_t s_sig, gcry_sexp_t s_data, gcry_sexp_t s_keyparms)
   else
     {
       point_init (&pk.Q);
-      if (pk.E.dialect == ECC_DIALECT_ED25519)
+      if (pk.E.dialect == ECC_DIALECT_ED25519 || pk.E.dialect == ECC_DIALECT_ED448)
         {
           mpi_ec_t ec;
 
@@ -1877,14 +1868,8 @@ compute_keygrip (gcry_md_hd_t md, gcry_sexp_t keyparms)
      FIXME: This is a crude hacks.  We need to fix that.  */
   if (!curvename)
     {
-      model = ((flags & PUBKEY_FLAG_EDDSA)
-               ? MPI_EC_EDWARDS
-               : MPI_EC_WEIERSTRASS);
-      dialect = ((flags & PUBKEY_FLAG_EDDSA)
-                 ? ECC_DIALECT_ED25519
-                 : ECC_DIALECT_STANDARD);
-      if (!values[5])
-	values[5] = mpi_const (MPI_C_ONE);
+      rc = GPG_ERR_BUG;
+      goto leave;
     }
 
   /* Check that all parameters are known and normalize all MPIs (that
@@ -1999,7 +1984,7 @@ _gcry_pk_ecc_get_sexp (gcry_sexp_t *r_sexp, int mode, mpi_ec_t ec)
       goto leave;
     }
 
-  if (ec->dialect == ECC_DIALECT_ED25519)
+  if (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448)
     {
       unsigned char *encpk;
       unsigned int encpklen;

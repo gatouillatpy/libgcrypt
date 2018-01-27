@@ -98,6 +98,7 @@ _gcry_ecc_dialect2str (enum ecc_dialects dialect)
     {
     case ECC_DIALECT_STANDARD:  str = "Standard"; break;
     case ECC_DIALECT_ED25519:   str = "Ed25519"; break;
+    case ECC_DIALECT_ED448:   str = "Ed448"; break;
     }
   return str;
 }
@@ -257,8 +258,7 @@ _gcry_ecc_compute_public (mpi_point_t Q, mpi_ec_t ec,
   if (ec->model == MPI_EC_EDWARDS && !ec->b)
     return NULL;
 
-  if (ec->dialect == ECC_DIALECT_ED25519
-      && (ec->flags & PUBKEY_FLAG_EDDSA))
+  if ((ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448) && (ec->flags & PUBKEY_FLAG_EDDSA))
     {
       gcry_mpi_t a;
       unsigned char *digest;
@@ -267,7 +267,10 @@ _gcry_ecc_compute_public (mpi_point_t Q, mpi_ec_t ec,
         return NULL;
 
       a = mpi_snew (0);
-      _gcry_mpi_set_buffer (a, digest, 32, 0);
+      if (ec->dialect == ECC_DIALECT_ED25519)
+        _gcry_mpi_set_buffer (a, digest, 32, 0);
+      else if (ec->dialect == ECC_DIALECT_ED448)
+        _gcry_mpi_set_buffer (a, digest, 57, 0);
       xfree (digest);
 
       /* And finally the public key.  */

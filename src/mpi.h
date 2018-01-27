@@ -232,6 +232,7 @@ struct gcry_mpi_point
   gcry_mpi_t x;
   gcry_mpi_t y;
   gcry_mpi_t z;
+  gcry_mpi_t t;
 };
 typedef struct gcry_mpi_point mpi_point_struct;
 typedef struct gcry_mpi_point *mpi_point_t;
@@ -266,8 +267,9 @@ enum gcry_mpi_ec_models
 enum ecc_dialects
   {
     ECC_DIALECT_STANDARD = 0,
-    ECC_DIALECT_ED25519
-  };
+    ECC_DIALECT_ED25519 = 1,
+	ECC_DIALECT_ED448
+};
 
 
 void _gcry_mpi_point_log (const char *name, mpi_point_t point, mpi_ec_t ctx);
