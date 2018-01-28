@@ -579,7 +579,7 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 	  goto leave;
   }
   gcry_mpi_t a, x, y;
-  mpi_point_struct Q; Q.t = 0;
+  mpi_point_struct Q;
   gcry_random_level_t random_level;
   char *dbuf;
   size_t dlen;
@@ -727,8 +727,8 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
   unsigned int rawmpilen;
   unsigned char *encpk = NULL; /* Encoded public key.  */
   unsigned int encpklen;
-  mpi_point_struct I; I.t = 0;          /* Intermediate value.  */
-  mpi_point_struct Q; Q.t = 0;          /* Public key.  */
+  mpi_point_struct I;          /* Intermediate value.  */
+  mpi_point_struct Q;          /* Public key.  */
   gcry_mpi_t a, x, y, r;
 
   memset (hvec, 0, sizeof hvec);
@@ -764,7 +764,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 		  rc = _gcry_ecc_eddsa_decodepoint(pk, ctx, &Q, &encpk, &encpklen);
 		  if (rc)
 			  goto leave;
-		  //if (DBG_CIPHER)
+		  if (DBG_CIPHER)
 			  log_printhex("* e_pk", encpk, encpklen);
 		  if (!_gcry_mpi_ec_curve_point(&Q, ctx))
 		  {
@@ -778,14 +778,14 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 		  rc = _gcry_ecc_eddsa_encodepoint(&Q, ctx, x, y, 0, &encpk, &encpklen);
 		  if (rc)
 			  goto leave;
-		  //if (DBG_CIPHER)
+		  if (DBG_CIPHER)
 			  log_printhex("  e_pk", encpk, encpklen);
 	  }
 
 	  /* Compute R.  */
 	  mbuf = mpi_get_opaque(input, &tmp);
 	  mlen = (tmp + 7) / 8;
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex("     m", mbuf, mlen);
 
 	  hvec[0].data = digest;
@@ -799,17 +799,17 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  reverse_buffer(digest, 64);
 	  _gcry_mpi_set_buffer(r, digest, 64, 0);
 	  mpi_mod(r, r, skey->E.n);
-//	  if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 	  log_mpidump("     r", r);
 	  _gcry_mpi_ec_mul_point(&I, r, &skey->E.G, ctx);
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printpnt("   r", &I, 0);
 
 	  /* Convert R into affine coordinates and apply encoding.  */
 	  rc = _gcry_ecc_eddsa_encodepoint(&I, ctx, x, y, 0, &rawmpi, &rawmpilen);
 	  if (rc)
 		  goto leave;
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex("   e_r", rawmpi, rawmpilen);
 
 	  /* S = r + a * H(encodepoint(R) + encodepoint(pk) + m) mod n  */
@@ -831,7 +831,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  rawmpi = NULL;
 
 	  reverse_buffer(digest, 64);
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex(" H(R+)", digest, 64);
 	  _gcry_mpi_set_buffer(s, digest, 64, 0);
 	  mpi_mulm(s, s, a, skey->E.n);
@@ -839,7 +839,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  rc = eddsa_encodempi(s, b, &rawmpi, &rawmpilen);
 	  if (rc)
 		  goto leave;
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex("   e_s", rawmpi, rawmpilen);
 	  mpi_set_opaque(s, rawmpi, rawmpilen * 8);
 	  rawmpi = NULL;
@@ -852,8 +852,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  rc = _gcry_ecc_eddsa_compute_h_d(&digest, skey->d, ctx);
 	  if (rc)
 		  goto leave;
-	  log_printhex(">>>>>>", digest, 114);
-	  _gcry_mpi_set_buffer(a, digest, 57, 0); // = a (line 441) => OK
+	  _gcry_mpi_set_buffer(a, digest, 57, 0);
 
 	  /* Compute the public key if it has not been supplied as optional
 	  parameter.  */
@@ -862,8 +861,8 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 		  rc = _gcry_ecc_eddsa_decodepoint(pk, ctx, &Q, &encpk, &encpklen);
 		  if (rc)
 			  goto leave;
-//		  if (DBG_CIPHER)
-			  log_printhex("* e_pk", encpk, encpklen); // public key => OK
+		  if (DBG_CIPHER)
+			  log_printhex("* e_pk", encpk, encpklen);
 		  if (!_gcry_mpi_ec_curve_point(&Q, ctx))
 		  {
 			  rc = GPG_ERR_BROKEN_PUBKEY;
@@ -876,15 +875,15 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 		  rc = _gcry_ecc_eddsa_encodepoint(&Q, ctx, x, y, 0, &encpk, &encpklen);
 		  if (rc)
 			  goto leave;
-//		  if (DBG_CIPHER)
-			  log_printhex("  e_pk", encpk, encpklen); // public key => OK
+		  if (DBG_CIPHER)
+			  log_printhex("  e_pk", encpk, encpklen);
 	  }
 
 	  /* Compute R.  */
 	  mbuf = mpi_get_opaque(input, &tmp);
 	  mlen = (tmp + 7) / 8;
-//	  if (DBG_CIPHER)
-		  log_printhex("     m", mbuf, mlen); // data to hash => OK
+	  if (DBG_CIPHER)
+		  log_printhex("     m", mbuf, mlen);
 
 	  unsigned char *hash_d = NULL;
 	  hash_d = xtrymalloc_secure(2 * b);
@@ -905,17 +904,17 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  reverse_buffer(hash_d, 114);
 	  _gcry_mpi_set_buffer(r, hash_d, 114, 0);
 	  mpi_mod(r, r, skey->E.n);
-//	  if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 	      log_mpidump("     r", r);
 	  _gcry_mpi_ec_mul_point(&I, r, &skey->E.G, ctx);
-//	  if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printpnt("   r", &I, 0);
 
 	  /* Convert R into affine coordinates and apply encoding.  */
 	  rc = _gcry_ecc_eddsa_encodepoint(&I, ctx, x, y, 0, &rawmpi, &rawmpilen);
 	  if (rc)
 		  goto leave;
-//	  if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex("   e_r", rawmpi, rawmpilen);
 
 	  /* S = r + a * H(encodepoint(R) + encodepoint(pk) + m) mod n  */
@@ -934,7 +933,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  rawmpi = NULL;
 
 	  reverse_buffer(hash_d, 114);
-//	  if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex(" H(R+)", hash_d, 114);
 	  _gcry_mpi_set_buffer(s, hash_d, 114, 0);
 	  mpi_mulm(s, s, a, skey->E.n);
@@ -942,7 +941,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  rc = eddsa_encodempi(s, b, &rawmpi, &rawmpilen);
 	  if (rc)
 		  goto leave;
-//	  if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex("   e_s", rawmpi, rawmpilen);
 	  mpi_set_opaque(s, rawmpi, rawmpilen * 8);
 	  rawmpi = NULL;
@@ -986,15 +985,14 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   size_t mlen, rlen;
   unsigned int tlen;
   gcry_mpi_t h, s;
-  mpi_point_struct Ia, Ib, Ic;
+  mpi_point_struct Ia, Ib;
 
   if (!mpi_is_opaque (input) || !mpi_is_opaque (r_in) || !mpi_is_opaque (s_in))
     return GPG_ERR_INV_DATA;
 
-  point_init(&Q); Q.t = 0;
-  point_init(&Ia); Ia.t = 0;
-  point_init(&Ib); Ib.t = 0;
-  point_init(&Ic); Ic.t = 0;
+  point_init(&Q);
+  point_init(&Ia);
+  point_init(&Ib);
   h = mpi_new (0);
   s = mpi_new (0);
 
@@ -1020,7 +1018,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
       rc = GPG_ERR_BROKEN_PUBKEY;
       goto leave;
     }
-  //if (DBG_CIPHER)
+  if (DBG_CIPHER)
     log_printhex ("  e_pk", encpk, encpklen);
   if (encpklen != b)
     {
@@ -1031,11 +1029,11 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   /* Convert the other input parameters.  */
   mbuf = mpi_get_opaque (input, &tmp);
   mlen = (tmp +7)/8;
-  //if (DBG_CIPHER)
+  if (DBG_CIPHER)
     log_printhex ("     m", mbuf, mlen);
   rbuf = mpi_get_opaque (r_in, &tmp);
   rlen = (tmp +7)/8;
-  //if (DBG_CIPHER)
+  if (DBG_CIPHER)
     log_printhex ("     r", rbuf, rlen);
   if (rlen != b)
     {
@@ -1060,7 +1058,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 	  if (rc)
 		goto leave;
 	  reverse_buffer (digest, 64);
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		log_printhex (" H(R+)", digest, 64);
 	  _gcry_mpi_set_buffer (h, digest, 64, 0);
   } else if (b == 456 / 8) {
@@ -1081,7 +1079,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 	  if (rc)
 		  goto leave;
 	  reverse_buffer(hash_d, 114);
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex(" H(R+)", hash_d, 114);
 	  _gcry_mpi_set_buffer(h, hash_d, 114, 0);
   }
@@ -1096,7 +1094,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
     sbuf = _gcry_mpi_get_opaque_copy (s_in, &tmp);
     slen = (tmp +7)/8;
     reverse_buffer (sbuf, slen);
-    //if (DBG_CIPHER)
+    if (DBG_CIPHER)
       log_printhex ("     s", sbuf, slen);
     _gcry_mpi_set_buffer (s, sbuf, slen, 0);
     xfree (sbuf);
@@ -1108,23 +1106,13 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   }
 
   _gcry_mpi_ec_mul_point (&Ia, s, &pkey->E.G, ctx);
-  //	  if (DBG_CIPHER)
-	log_printpnt("   Ia", &Ia, 0);
   _gcry_mpi_ec_mul_point (&Ib, h, &Q, ctx);
-  //	  if (DBG_CIPHER)
-	log_printpnt("   Ib", &Ib, 0);
   _gcry_mpi_sub (Ib.x, ctx->p, Ib.x);
-  if (Ib.t)
-	  _gcry_mpi_sub(Ib.t, ctx->p, Ib.t);
-  //	  if (DBG_CIPHER)
-	log_printpnt("   Ib", &Ib, 0);
-  _gcry_mpi_ec_add_points (&Ic, &Ia, &Ib, ctx);
-  //	  if (DBG_CIPHER)
-	log_printpnt("   Ic", &Ic, 0);
-  rc = _gcry_ecc_eddsa_encodepoint (&Ic, ctx, s, h, 0, &tbuf, &tlen);
+  _gcry_mpi_ec_add_points (&Ib, &Ia, &Ib, ctx);
+  rc = _gcry_ecc_eddsa_encodepoint (&Ib, ctx, s, h, 0, &tbuf, &tlen);
   if (rc)
     goto leave;
-  //if (DBG_CIPHER)
+  if (DBG_CIPHER)
     log_printhex("     t", tbuf, tlen);
   if (tlen != rlen || memcmp (tbuf, rbuf, tlen))
     {

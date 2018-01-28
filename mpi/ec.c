@@ -72,8 +72,6 @@ _gcry_mpi_point_log (const char *name, mpi_point_t point, mpi_ec_t ctx)
       log_mpidump (buf, y);
       buf[strlen(buf)-1] = 'z';
       log_mpidump (buf, point->z);
-      buf[strlen(buf)-1] = 't';
-      log_mpidump (buf, point->t);
     }
   if (ctx)
     {
@@ -129,9 +127,6 @@ _gcry_mpi_point_free_parts (mpi_point_t p)
   mpi_free (p->x); p->x = NULL;
   mpi_free (p->y); p->y = NULL;
   mpi_free (p->z); p->z = NULL;
-  if (p->t) {
-	  mpi_free(p->t); p->t = NULL;
-  }
 }
 
 
@@ -142,13 +137,6 @@ point_set (mpi_point_t d, mpi_point_t s)
   mpi_set (d->x, s->x);
   mpi_set (d->y, s->y);
   mpi_set (d->z, s->z);
-  if (s->t) {
-	  if (!d->t)
-		  d->t = mpi_new(0);
-	  mpi_set(d->t, s->t);
-  } else if(d->t) {
-	  mpi_set_ui(d->t, 0);
-  }
 }
 
 
@@ -180,8 +168,6 @@ point_resize (mpi_point_t p, mpi_ec_t ctx)
   if (ctx->model != MPI_EC_MONTGOMERY)
     mpi_resize (p->y, nlimbs);
   mpi_resize (p->z, nlimbs);
-  if (p->t)
-	mpi_resize (p->t, nlimbs);
 }
 
 
@@ -193,8 +179,6 @@ point_swap_cond (mpi_point_t d, mpi_point_t s, unsigned long swap,
   if (ctx->model != MPI_EC_MONTGOMERY)
     mpi_swap_cond (d->y, s->y, swap);
   mpi_swap_cond (d->z, s->z, swap);
-  if (d->t && s->t)
-	mpi_swap_cond (d->t, s->t, swap);
 }
 
 
@@ -850,114 +834,69 @@ dup_point_edwards (mpi_point_t result, mpi_point_t point, mpi_ec_t ctx)
 #define X1 (point->x)
 #define Y1 (point->y)
 #define Z1 (point->z)
-#define T1 (point->t)
 #define X3 (result->x)
 #define Y3 (result->y)
 #define Z3 (result->z)
-#define T3 (result->t)
-#define A (ctx->t.scratch[0])
-#define B (ctx->t.scratch[1])
-#define C (ctx->t.scratch[2])
-#define D (ctx->t.scratch[3])
-#define E (ctx->t.scratch[4])
-#define F (ctx->t.scratch[5])
-#define G (ctx->t.scratch[6])
-#define H (ctx->t.scratch[7])
-#define U (ctx->t.scratch[8])
-#define V (ctx->t.scratch[9])
-#define W (ctx->t.scratch[10])
+#define B (ctx->t.scratch[0])
+#define C (ctx->t.scratch[1])
+#define D (ctx->t.scratch[2])
+#define E (ctx->t.scratch[3])
+#define F (ctx->t.scratch[4])
+#define H (ctx->t.scratch[5])
+#define J (ctx->t.scratch[6])
 
-  /* Compute: (X_3 : Y_3 : Z_3) = 2(X_1 : Y_1 : Z_1) */
+  /* Compute: (X_3 : Y_3 : Z_3) = 2( X_1 : Y_1 : Z_1 ) */
 
-	if (ctx->dialect == ECC_DIALECT_ED25519) {
-		/* A = X1 ^ 2 */
-		ec_mulm(A, X1, X1, ctx);
+  /* B = (X_1 + Y_1)^2  */
+  ec_addm (B, X1, Y1, ctx);
+  ec_pow2 (B, B, ctx);
 
-		/* B = Y1 ^ 2 */
-		ec_mulm(B, Y1, Y1, ctx);
+  /* C = X_1^2 */
+  /* D = Y_1^2 */
+  ec_pow2 (C, X1, ctx);
+  ec_pow2 (D, Y1, ctx);
 
-		/* C = 2 · Z1 ^ 2 */
-		ec_mulm(U, Z1, Z1, ctx);
-		ec_addm(C, U, U, ctx);
+  /* E = aC */
+  if (ctx->dialect == ECC_DIALECT_ED25519)
+    mpi_sub (E, ctx->p, C);
+  else
+    ec_mulm (E, ctx->a, C, ctx);
 
-		/* H = A + B */
-		ec_addm(H, A, B, ctx);
+  /* F = E + D */
+  ec_addm (F, E, D, ctx);
 
-		/* E = H - (X1 + Y1) ^ 2 */
-		ec_addm(U, X1, Y1, ctx);
-		ec_mulm(V, U, U, ctx);
-		ec_subm(E, H, V, ctx);
+  /* H = Z_1^2 */
+  ec_pow2 (H, Z1, ctx);
 
-		/* G = A - B */
-		ec_subm(G, A, B, ctx);
+  /* J = F - 2H */
+  ec_mul2 (J, H, ctx);
+  ec_subm (J, F, J, ctx);
 
-		/* F = C + G */
-		ec_addm(F, C, G, ctx);
+  /* X_3 = (B - C - D) · J */
+  ec_subm (X3, B, C, ctx);
+  ec_subm (X3, X3, D, ctx);
+  ec_mulm (X3, X3, J, ctx);
 
-		/* X3 = E · F */
-		ec_mulm(X3, E, F, ctx);
+  /* Y_3 = F · (E - D) */
+  ec_subm (Y3, E, D, ctx);
+  ec_mulm (Y3, Y3, F, ctx);
 
-		/* Y3 = G · H */
-		ec_mulm(Y3, G, H, ctx);
-
-		/* Z3 = F · G */
-		ec_mulm(Z3, F, G, ctx);
-
-		/* T3 = E · H */
-		if (!T3)
-			T3 = mpi_new(0);
-		ec_mulm(T3, E, H, ctx);
-	} else if (ctx->dialect == ECC_DIALECT_ED448) {
-		/* U = X1 · X1 */
-		ec_mulm(U, X1, X1, ctx);
-		/* V = Y1 · Y1 */
-		ec_mulm(V, Y1, Y1, ctx);
-		/* W = Z1 · Z1 */
-		ec_mulm(W, Z1, Z1, ctx);
-
-		/* A = X + Y */
-		ec_addm(A, X1, Y1, ctx);
-
-		/* F = U + V */
-		ec_addm(F, U, V, ctx);
-
-		/* G = F - 2 · W */
-		ec_addm(B, W, W, ctx);
-		ec_subm(G, F, B, ctx);
-
-		/* X3 = (A ^ 2 - U - V) · G */
-		ec_mulm(B, A, A, ctx);
-		ec_subm(C, B, U, ctx);
-		ec_subm(D, C, V, ctx);
-		ec_mulm(X3, D, G, ctx);
-
-		/* Y3 = F · (U - V) */
-		ec_subm(B, U, V, ctx);
-		ec_mulm(Y3, F, B, ctx);
-
-		/* Z3 = F · G */
-		ec_mulm(Z3, F, G, ctx);
-	}
+  /* Z_3 = F · J */
+  ec_mulm (Z3, F, J, ctx);
 
 #undef X1
 #undef Y1
 #undef Z1
-#undef T1
 #undef X3
 #undef Y3
 #undef Z3
-#undef T3
-#undef A
 #undef B
 #undef C
 #undef D
 #undef E
 #undef F
-#undef G
 #undef H
-#undef U
-#undef V
-#undef W
+#undef J
 }
 
 
@@ -1068,36 +1007,36 @@ add_points_weierstrass (mpi_point_t result,
           else
             {
               /* P1 is the inverse of P2.  */
-mpi_set_ui(x3, 1);
-mpi_set_ui(y3, 1);
-mpi_set_ui(z3, 0);
-			}
-		}
-	  else
-	  {
-		  /* l7 = l1 + l2  */
-		  ec_addm(l7, l1, l2, ctx);
-		  /* l8 = l4 + l5  */
-		  ec_addm(l8, l4, l5, ctx);
-		  /* z3 = z1 z2 l3  */
-		  ec_mulm(z3, z1, z2, ctx);
-		  ec_mulm(z3, z3, l3, ctx);
-		  /* x3 = l6^2 - l7 l3^2  */
-		  ec_pow2(t1, l6, ctx);
-		  ec_pow2(t2, l3, ctx);
-		  ec_mulm(t2, t2, l7, ctx);
-		  ec_subm(x3, t1, t2, ctx);
-		  /* l9 = l7 l3^2 - 2 x3  */
-		  ec_mul2(t1, x3, ctx);
-		  ec_subm(l9, t2, t1, ctx);
-		  /* y3 = (l9 l6 - l8 l3^3)/2  */
-		  ec_mulm(l9, l9, l6, ctx);
-		  ec_powm(t1, l3, mpi_const(MPI_C_THREE), ctx); /* fixme: Use saved value*/
-		  ec_mulm(t1, t1, l8, ctx);
-		  ec_subm(y3, l9, t1, ctx);
-		  ec_mulm(y3, y3, ec_get_two_inv_p(ctx), ctx);
-	  }
-	}
+              mpi_set_ui (x3, 1);
+              mpi_set_ui (y3, 1);
+              mpi_set_ui (z3, 0);
+            }
+        }
+      else
+        {
+          /* l7 = l1 + l2  */
+          ec_addm (l7, l1, l2, ctx);
+          /* l8 = l4 + l5  */
+          ec_addm (l8, l4, l5, ctx);
+          /* z3 = z1 z2 l3  */
+          ec_mulm (z3, z1, z2, ctx);
+          ec_mulm (z3, z3, l3, ctx);
+          /* x3 = l6^2 - l7 l3^2  */
+          ec_pow2 (t1, l6, ctx);
+          ec_pow2 (t2, l3, ctx);
+          ec_mulm (t2, t2, l7, ctx);
+          ec_subm (x3, t1, t2, ctx);
+          /* l9 = l7 l3^2 - 2 x3  */
+          ec_mul2 (t1, x3, ctx);
+          ec_subm (l9, t2, t1, ctx);
+          /* y3 = (l9 l6 - l8 l3^3)/2  */
+          ec_mulm (l9, l9, l6, ctx);
+          ec_powm (t1, l3, mpi_const (MPI_C_THREE), ctx); /* fixme: Use saved value*/
+          ec_mulm (t1, t1, l8, ctx);
+          ec_subm (y3, l9, t1, ctx);
+          ec_mulm (y3, y3, ec_get_two_inv_p (ctx), ctx);
+        }
+    }
 
 #undef x1
 #undef y1
@@ -1124,37 +1063,34 @@ mpi_set_ui(z3, 0);
 
 /* RESULT = P1 + P2  (Montgomery version).*/
 static void
-add_points_montgomery(mpi_point_t result,
-	mpi_point_t p1, mpi_point_t p2,
-	mpi_ec_t ctx)
+add_points_montgomery (mpi_point_t result,
+                       mpi_point_t p1, mpi_point_t p2,
+                       mpi_ec_t ctx)
 {
-	(void)result;
-	(void)p1;
-	(void)p2;
-	(void)ctx;
-	log_fatal("%s: %s not yet supported\n",
-		"_gcry_mpi_ec_add_points", "Montgomery");
+  (void)result;
+  (void)p1;
+  (void)p2;
+  (void)ctx;
+  log_fatal ("%s: %s not yet supported\n",
+             "_gcry_mpi_ec_add_points", "Montgomery");
 }
 
 
 /* RESULT = P1 + P2  (Twisted Edwards version).*/
 static void
-add_points_edwards(mpi_point_t result,
-	mpi_point_t p1, mpi_point_t p2,
-	mpi_ec_t ctx)
+add_points_edwards (mpi_point_t result,
+                    mpi_point_t p1, mpi_point_t p2,
+                    mpi_ec_t ctx)
 {
 #define X1 (p1->x)
 #define Y1 (p1->y)
 #define Z1 (p1->z)
-#define T1 (p1->t)
 #define X2 (p2->x)
 #define Y2 (p2->y)
 #define Z2 (p2->z)
-#define T2 (p2->t)
 #define X3 (result->x)
 #define Y3 (result->y)
 #define Z3 (result->z)
-#define T3 (result->t)
 #define A (ctx->t.scratch[0])
 #define B (ctx->t.scratch[1])
 #define C (ctx->t.scratch[2])
@@ -1162,131 +1098,67 @@ add_points_edwards(mpi_point_t result,
 #define E (ctx->t.scratch[4])
 #define F (ctx->t.scratch[5])
 #define G (ctx->t.scratch[6])
-#define H (ctx->t.scratch[7])
-#define U (ctx->t.scratch[8])
-#define V (ctx->t.scratch[9])
-#define W (ctx->t.scratch[10])
+#define tmp (ctx->t.scratch[7])
 
-	/* Compute: (X_3 : Y_3 : Z_3) = (X_1 : Y_1 : Z_1) + (X_2 : Y_2 : Z_2)  */
+  /* Compute: (X_3 : Y_3 : Z_3) = (X_1 : Y_1 : Z_1) + (X_2 : Y_2 : Z_3)  */
 
-	if (ctx->dialect == ECC_DIALECT_ED25519) {
-		/* T1 = X1 · Y1 */
-		if (!T1) {
-			T1 = mpi_new(0);
-			ec_mulm(T1, X1, Y1, ctx);
-		}
+  /* A = Z1 · Z2 */
+  ec_mulm (A, Z1, Z2, ctx);
 
-		/* T2 = X2 · Y2 */
-		if (!T2) {
-			T2 = mpi_new(0);
-			ec_mulm(T2, X2, Y2, ctx);
-		}
+  /* B = A^2 */
+  ec_pow2 (B, A, ctx);
 
-		/* A = (Y1 - X1) · (Y2 - X2) */
-		ec_subm(U, Y1, X1, ctx);
-		ec_subm(V, Y2, X2, ctx);
-		ec_mulm(A, U, V, ctx);
+  /* C = X1 · X2 */
+  ec_mulm (C, X1, X2, ctx);
 
-		/* B = (Y1 + X1) · (Y2 + X2) */
-		ec_addm(U, Y1, X1, ctx);
-		ec_addm(V, Y2, X2, ctx);
-		ec_mulm(B, U, V, ctx);
+  /* D = Y1 · Y2 */
+  ec_mulm (D, Y1, Y2, ctx);
 
-		/* C = T1 · 2 · d · T2 */
-		ec_addm(U, ctx->b, ctx->b, ctx);
-		ec_mulm(V, T1, U, ctx);
-		ec_mulm(C, V, T2, ctx);
+  /* E = d · C · D */
+  ec_mulm (E, ctx->b, C, ctx);
+  ec_mulm (E, E, D, ctx);
 
-		/* D = 2 · Z1 · Z2 */
-		ec_mulm(U, Z1, Z2, ctx);
-		ec_addm(D, U, U, ctx);
+  /* F = B - E */
+  ec_subm (F, B, E, ctx);
 
-		/* E = B - A */
-		ec_subm(E, B, A, ctx);
+  /* G = B + E */
+  ec_addm (G, B, E, ctx);
 
-		/* F = D - C */
-		ec_subm(F, D, C, ctx);
+  /* X_3 = A · F · ((X_1 + Y_1) · (X_2 + Y_2) - C - D) */
+  ec_addm (tmp, X1, Y1, ctx);
+  ec_addm (X3, X2, Y2, ctx);
+  ec_mulm (X3, X3, tmp, ctx);
+  ec_subm (X3, X3, C, ctx);
+  ec_subm (X3, X3, D, ctx);
+  ec_mulm (X3, X3, F, ctx);
+  ec_mulm (X3, X3, A, ctx);
 
-		/* G = D + C */
-		ec_addm(G, D, C, ctx);
+  /* Y_3 = A · G · (D - aC) */
+  if (ctx->dialect == ECC_DIALECT_ED25519)
+    {
+      ec_addm (Y3, D, C, ctx);
+    }
+  else
+    {
+      ec_mulm (Y3, ctx->a, C, ctx);
+      ec_subm (Y3, D, Y3, ctx);
+    }
+  ec_mulm (Y3, Y3, G, ctx);
+  ec_mulm (Y3, Y3, A, ctx);
 
-		/* H = B + A */
-		ec_addm(H, B, A, ctx);
+  /* Z_3 = F · G */
+  ec_mulm (Z3, F, G, ctx);
 
-		/* X3 = E · F */
-		ec_mulm(X3, E, F, ctx);
-
-		/* Y3 = G · H */
-		ec_mulm(Y3, G, H, ctx);
-
-		/* Z3 = F · G */
-		ec_mulm(Z3, F, G, ctx);
-
-		/* T3 = E · H */
-		if (!T3)
-			T3 = mpi_new(0);
-		ec_mulm(T3, E, H, ctx);
-	} else if (ctx->dialect == ECC_DIALECT_ED448) {
-		/* U = X1 · X2 */
-		ec_mulm(U, X1, X2, ctx);
-		//log_mpidump(">>>> U", U);
-		/* V = Y1 · Y2 */
-		ec_mulm(V, Y1, Y2, ctx);
-		//log_mpidump(">>>> V", V);
-		/* W = Z1 · Z2 */
-		ec_mulm(W, Z1, Z2, ctx);
-		//log_mpidump(">>>> W", W);
-
-		/* B = W ^ 2 */
-		ec_mulm(B, W, W, ctx);
-		//log_mpidump(">>>> B", B);
-
-		/* E = d · U · V */
-		ec_mulm(D, ctx->b, U, ctx);
-		ec_mulm(E, D, V, ctx);
-		//log_mpidump(">>>> E", E);
-
-		/* F = B - E */
-		ec_subm(F, B, E, ctx);
-		//log_mpidump(">>>> F", F);
-
-		/* G = B + E */
-		ec_addm(G, B, E, ctx);
-		//log_mpidump(">>>> G", G);
-
-		/* X3 = W · F · ((X1 + Y1) · (X2 + Y2) - U - V) */
-		ec_addm(C, X1, Y1, ctx);
-		ec_addm(D, X2, Y2, ctx);
-		ec_mulm(A, C, D, ctx);
-		ec_subm(C, A, U, ctx);
-		ec_subm(D, C, V, ctx);
-		ec_mulm(A, W, F, ctx);
-		ec_mulm(X3, A, D, ctx);
-		//log_mpidump(">>>> X3", X3);
-
-		/* Y3 = W · G · (V - U) */
-		ec_mulm(C, W, G, ctx);
-		ec_subm(D, V, U, ctx);
-		ec_mulm(Y3, C, D, ctx);
-		//log_mpidump(">>>> Y3", Y3);
-
-		/* Z3 = F · G */
-		ec_mulm(Z3, F, G, ctx);
-		//log_mpidump(">>>> Z3", Z3);
-	}
 
 #undef X1
 #undef Y1
 #undef Z1
-#undef T1
 #undef X2
 #undef Y2
 #undef Z2
-#undef T2
 #undef X3
 #undef Y3
 #undef Z3
-#undef T3
 #undef A
 #undef B
 #undef C
@@ -1294,10 +1166,7 @@ add_points_edwards(mpi_point_t result,
 #undef E
 #undef F
 #undef G
-#undef H
-#undef U
-#undef V
-#undef W
+#undef tmp
 }
 
 
@@ -1432,57 +1301,55 @@ _gcry_mpi_ec_mul_point (mpi_point_t result,
       || (ctx->model == MPI_EC_WEIERSTRASS
           && mpi_is_secure (scalar)))
     {
+      /* Simple left to right binary method.  Algorithm 3.27 from
+       * {author={Hankerson, Darrel and Menezes, Alfred J. and Vanstone, Scott},
+       *  title = {Guide to Elliptic Curve Cryptography},
+       *  year = {2003}, isbn = {038795273X},
+       *  url = {http://www.cacr.math.uwaterloo.ca/ecc/},
+       *  publisher = {Springer-Verlag New York, Inc.}} */
+      unsigned int nbits;
+      int j;
+
+      nbits = mpi_get_nbits (scalar);
       if (ctx->model == MPI_EC_WEIERSTRASS)
         {
-          mpi_set_ui(result->x, 1);
-          mpi_set_ui(result->y, 1);
-          mpi_set_ui(result->z, 0);
-	  }
+          mpi_set_ui (result->x, 1);
+          mpi_set_ui (result->y, 1);
+          mpi_set_ui (result->z, 0);
+        }
       else
         {
-          mpi_set_ui(result->x, 0);
-          mpi_set_ui(result->y, 1);
-          mpi_set_ui(result->z, 1);
-	  }
+          mpi_set_ui (result->x, 0);
+          mpi_set_ui (result->y, 1);
+          mpi_set_ui (result->z, 1);
+        }
 
-		log_mpidump(">>>> scalar", scalar);
-		log_mpidump(">>>> point.x", point->x);
-		log_mpidump(">>>> point.y", point->y);
-		log_mpidump(">>>> point.z", point->z);
-		if (point->t)
-			log_mpidump(">>>> point.t", point->t);
+      if (mpi_is_secure (scalar))
+        {
+          /* If SCALAR is in secure memory we assume that it is the
+             secret key we use constant time operation.  */
+          mpi_point_struct tmppnt;
 
-		mpi_point_struct r; point_init(&r); r.t = 0; point_set(&r, result);
-		mpi_point_struct s; point_init(&s); s.t = 0; point_set(&s, point);
-		mpi_point_struct t; point_init(&t); t.t = 0;
-		gcry_mpi_t w = mpi_new(0);
-		gcry_mpi_t x = mpi_copy(scalar);
-
-		point_resize (result, ctx);
-		  
-		while (mpi_cmp_ui(x, 0) > 0)
-		{
-			if (mpi_test_bit(x, 0)) {
-				_gcry_mpi_ec_add_points(&t, &r, &s, ctx); point_set(&r, &t);
-				//log_mpidump(">>>> r.x", r.x);
-				//log_mpidump(">>>> r.y", r.y);
-				//log_mpidump(">>>> r.z", r.z);
-				//if (r.t)
-				//	log_mpidump(">>>> r.t", r.t);
-			}
-			_gcry_mpi_ec_dup_point(&t, &s, ctx); point_set(&s, &t);
-			//log_mpidump(">>>> s.x", s.x);
-			//log_mpidump(">>>> s.y", s.y);
-			//log_mpidump(">>>> s.z", s.z);
-			//if (r.t)
-			//	log_mpidump(">>>> s.t", s.t);
-			mpi_tdiv_q_2exp(w, x, 1); mpi_set(x, w);
-			//log_mpidump(">>>> x", x);
-		}
-		point_set(result, &r);
-		point_free(&r);
-		point_free(&s);
-		point_free(&t);
+          point_init (&tmppnt);
+          point_resize (result, ctx);
+		  point_resize (&tmppnt, ctx);
+          for (j=nbits-1; j >= 0; j--)
+            {
+              _gcry_mpi_ec_dup_point (result, result, ctx);
+              _gcry_mpi_ec_add_points (&tmppnt, result, point, ctx);
+              point_swap_cond (result, &tmppnt, mpi_test_bit (scalar, j), ctx);
+            }
+          point_free (&tmppnt);
+        }
+      else
+        {
+          for (j=nbits-1; j >= 0; j--)
+            {
+              _gcry_mpi_ec_dup_point (result, result, ctx);
+              if (mpi_test_bit (scalar, j))
+                _gcry_mpi_ec_add_points (result, result, point, ctx);
+            }
+        }
       return;
     }
   else if (ctx->model == MPI_EC_MONTGOMERY)

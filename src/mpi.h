@@ -232,7 +232,6 @@ struct gcry_mpi_point
   gcry_mpi_t x;
   gcry_mpi_t y;
   gcry_mpi_t z;
-  gcry_mpi_t t;
 };
 typedef struct gcry_mpi_point mpi_point_struct;
 typedef struct gcry_mpi_point *mpi_point_t;
