@@ -557,6 +557,8 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
  * @E:   Parameters of the curve.
  * @ctx: Elliptic curve computation context.
  * @flags: Flags controlling aspects of the creation.
+ * @dbuf: Optional buffer already containing the D component.
+ * @dlen: Size of this buffer.
  *
  * Return: An error code.
  *
@@ -565,7 +567,7 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
  */
 gpg_err_code_t
 _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
-                        int flags)
+                        int flags, char *dbuf, size_t dlen)
 {
  start:
   gpg_err_code_t rc;
@@ -581,30 +583,31 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
   gcry_mpi_t a, x, y;
   mpi_point_struct Q;
   gcry_random_level_t random_level;
-  char *dbuf;
-  size_t dlen;
   unsigned char *hash_d = NULL;
 
   point_init (&Q);
-
-  if ((flags & PUBKEY_FLAG_TRANSIENT_KEY))
-    random_level = GCRY_STRONG_RANDOM;
-  else
-    random_level = GCRY_VERY_STRONG_RANDOM;
 
   a = mpi_snew (0);
   x = mpi_new (0);
   y = mpi_new (0);
 
-  /* Generate a secret.  */
-  hash_d = xtrymalloc_secure (2*b);
+  hash_d = xtrymalloc_secure(2 * b);
   if (!hash_d)
-    {
-      rc = gpg_err_code_from_syserror ();
-      goto leave;
-    }
-  dlen = b;
-  dbuf = _gcry_random_bytes_secure (dlen, random_level);
+  {
+	  rc = gpg_err_code_from_syserror();
+	  goto leave;
+  }
+
+  /* Generate a secret. */
+  if (dbuf == NULL) {
+	  if ((flags & PUBKEY_FLAG_TRANSIENT_KEY))
+		  random_level = GCRY_STRONG_RANDOM;
+	  else
+		  random_level = GCRY_VERY_STRONG_RANDOM;
+
+	  dlen = b;
+	  dbuf = _gcry_random_bytes_secure(dlen, random_level);
+  }
 
   /* Compute the A value.  */
   if (E->dialect == ECC_DIALECT_ED25519) {

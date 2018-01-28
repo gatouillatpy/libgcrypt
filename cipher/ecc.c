@@ -534,6 +534,8 @@ ecc_generate (const gcry_sexp_t genparms, gcry_sexp_t *r_skey)
   gcry_mpi_t Qx = NULL;
   gcry_mpi_t Qy = NULL;
   char *curve_name = NULL;
+  void *dbuf = NULL;
+  size_t dlen = 0;
   gcry_sexp_t l1;
   mpi_ec_t ctx = NULL;
   gcry_sexp_t curve_info = NULL;
@@ -603,12 +605,22 @@ ecc_generate (const gcry_sexp_t genparms, gcry_sexp_t *r_skey)
 
   ctx = _gcry_mpi_ec_p_internal_new (E.model, E.dialect, flags, E.p, E.a, E.b);
 
-  if (E.model == MPI_EC_MONTGOMERY)
-    rc = nist_generate_key (&sk, &E, ctx, flags, nbits, &Qx, NULL);
-  else if ((flags & PUBKEY_FLAG_EDDSA))
-    rc = _gcry_ecc_eddsa_genkey (&sk, &E, ctx, flags);
-  else
-    rc = nist_generate_key (&sk, &E, ctx, flags, nbits, &Qx, &Qy);
+  if (E.model == MPI_EC_MONTGOMERY) {
+	  rc = nist_generate_key(&sk, &E, ctx, flags, nbits, &Qx, NULL);
+  } else if ((flags & PUBKEY_FLAG_EDDSA)) {
+	  /* Parse the optional "secret" parameter. */
+	  l1 = sexp_find_token(genparms, "secret", 0);
+	  if (l1)
+	  {
+		  dbuf = _gcry_sexp_nth_buffer(l1, 1, &dlen);
+		  sexp_release(l1);
+		  if (!dbuf)
+			  return GPG_ERR_INV_OBJ; /* No curve name or value too large. */
+	  }
+	  rc = _gcry_ecc_eddsa_genkey(&sk, &E, ctx, flags, dbuf, dlen);
+  } else {
+	  rc = nist_generate_key(&sk, &E, ctx, flags, nbits, &Qx, &Qy);
+  }
   if (rc)
     goto leave;
 
