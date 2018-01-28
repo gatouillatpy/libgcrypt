@@ -909,7 +909,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	      log_mpidump("     r", r);
 	  _gcry_mpi_ec_mul_point(&I, r, &skey->E.G, ctx);
 //	  if (DBG_CIPHER)
-		  log_printpnt("   r", &I, ctx);
+		  log_printpnt("   r", &I, 0);
 
 	  /* Convert R into affine coordinates and apply encoding.  */
 	  rc = _gcry_ecc_eddsa_encodepoint(&I, ctx, x, y, 0, &rawmpi, &rawmpilen);
@@ -986,14 +986,15 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   size_t mlen, rlen;
   unsigned int tlen;
   gcry_mpi_t h, s;
-  mpi_point_struct Ia, Ib;
+  mpi_point_struct Ia, Ib, Ic;
 
   if (!mpi_is_opaque (input) || !mpi_is_opaque (r_in) || !mpi_is_opaque (s_in))
     return GPG_ERR_INV_DATA;
 
   point_init(&Q); Q.t = 0;
-  point_init (&Ia); Ia.t = 0;
-  point_init (&Ib); Ib.t = 0;
+  point_init(&Ia); Ia.t = 0;
+  point_init(&Ib); Ib.t = 0;
+  point_init(&Ic); Ic.t = 0;
   h = mpi_new (0);
   s = mpi_new (0);
 
@@ -1107,10 +1108,20 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   }
 
   _gcry_mpi_ec_mul_point (&Ia, s, &pkey->E.G, ctx);
+  //	  if (DBG_CIPHER)
+	log_printpnt("   Ia", &Ia, 0);
   _gcry_mpi_ec_mul_point (&Ib, h, &Q, ctx);
+  //	  if (DBG_CIPHER)
+	log_printpnt("   Ib", &Ib, 0);
   _gcry_mpi_sub (Ib.x, ctx->p, Ib.x);
-  _gcry_mpi_ec_add_points (&Ia, &Ia, &Ib, ctx);
-  rc = _gcry_ecc_eddsa_encodepoint (&Ia, ctx, s, h, 0, &tbuf, &tlen);
+  if (Ib.t)
+	  _gcry_mpi_sub(Ib.t, ctx->p, Ib.t);
+  //	  if (DBG_CIPHER)
+	log_printpnt("   Ib", &Ib, 0);
+  _gcry_mpi_ec_add_points (&Ic, &Ia, &Ib, ctx);
+  //	  if (DBG_CIPHER)
+	log_printpnt("   Ic", &Ic, 0);
+  rc = _gcry_ecc_eddsa_encodepoint (&Ic, ctx, s, h, 0, &tbuf, &tlen);
   if (rc)
     goto leave;
   //if (DBG_CIPHER)
