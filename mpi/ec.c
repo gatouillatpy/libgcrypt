@@ -448,6 +448,8 @@ ec_p_init (mpi_ec_t ctx, enum gcry_mpi_ec_models model,
     ctx->nbits = 256;
   else if (dialect == ECC_DIALECT_ED448)
     ctx->nbits = 456;
+  else if (dialect == ECC_DIALECT_ED168)
+	  ctx->nbits = 176;
   else
     ctx->nbits = mpi_get_nbits (p);
   ctx->p = mpi_copy (p);
@@ -646,7 +648,7 @@ _gcry_mpi_ec_decode_point (mpi_point_t result, gcry_mpi_t value, mpi_ec_t ec)
 {
   gcry_err_code_t rc;
 
-  if (ec && (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448))
+  if (ec && (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448 || ec->dialect == ECC_DIALECT_ED168))
     rc = _gcry_ecc_eddsa_decodepoint (value, ec, result, NULL, NULL);
   else if (ec && ec->model == MPI_EC_MONTGOMERY)
     rc = _gcry_ecc_mont_decodepoint (value, ec, result);

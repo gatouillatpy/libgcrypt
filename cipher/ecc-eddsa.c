@@ -97,6 +97,9 @@ eddsa_encode_x_y (gcry_mpi_t x, gcry_mpi_t y, unsigned int minlen,
   int off = with_prefix? 1:0;
 
   rawmpi = _gcry_mpi_get_buffer_extra (y, minlen, off?-1:0, &rawmpilen, NULL);
+  if (minlen == 22 && rawmpilen == 24) {
+	rawmpilen = 22; /* The value is fucked up in _gcry_mpi_get_buffer_extra -> do_get_buffer due to limbs having more than one byte */
+  }
   if (!rawmpi)
     return gpg_err_code_from_syserror ();
   if (mpi_test_bit (x, 0) && rawmpilen)
@@ -274,15 +277,22 @@ _gcry_ecc_eddsa_recover_x (gcry_mpi_t x, gcry_mpi_t y, int sign, mpi_ec_t ec)
     mpi_free (u);
 
     return rc;
-  } else if (ec->dialect == ECC_DIALECT_ED448) {
+  } else if (ec->dialect == ECC_DIALECT_ED448 || ec->dialect == ECC_DIALECT_ED168) {
     gpg_err_code_t rc = 0;
-    gcry_mpi_t u, v, u3, u5, v3, t;
-    static gcry_mpi_t p34, five;
+    gcry_mpi_t u, v, u3, u5, v3, t, p34;
+    static gcry_mpi_t p34_ed448, p34_ed168, five;
 
-    if (!p34)
-      p34 = scanval("3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+    if (!p34_ed448)
+		p34_ed448 = scanval("3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+	if (!p34_ed168)
+		p34_ed168 = scanval("3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBF");
 	if (!five)
 	  five = mpi_set_ui(NULL, 5);
+
+	if (ec->dialect == ECC_DIALECT_ED448)
+		p34 = p34_ed448;
+	else if (ec->dialect == ECC_DIALECT_ED168)
+		p34 = p34_ed168;
 
     u   = mpi_new (0);
     v   = mpi_new (0);
@@ -478,8 +488,8 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
   *r_digest = NULL;
 
   b = (ec->nbits+7)/8;
-  if (b != 256/8 && b != 456/8) /* ECC_DIALECT_ED25519 specific ?? */
-    return GPG_ERR_INTERNAL; /* We only support 256 or 456 bit. */
+  if (b != 256/8 && b != 456/8 && b != 176/8)
+    return GPG_ERR_INTERNAL; /* We only support 256, 456 or 176 bits. */
 
   /* Note that we clear DIGEST so we can use it as input to left pad
   the key with zeroes for hashing.  */
@@ -543,6 +553,35 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
 	  hash_d[1] = hash_d[1] | 0x80;
 	  hash_d[56] &= 0xfc;
 	  memcpy(digest, hash_d, 114);
+  } else if (b == 176 / 8) {
+	  digest = xtrycalloc_secure(2, b);
+	  if (!digest)
+		  return gpg_err_code_from_syserror();
+
+	  unsigned char *hash_d = NULL;
+	  hash_d = xtrymalloc_secure(2 * b);
+	  if (!hash_d) {
+		  rc = gpg_err_code_from_syserror();
+		  return rc;
+	  }
+
+	  gcry_md_hd_t hd;
+	  _gcry_md_open(&hd, GCRY_MD_SHAKE256, 0);
+	  _gcry_md_write(hd, rawmpi, rawmpilen);
+	  rc = _gcry_md_extract(hd, GCRY_MD_SHAKE256, hash_d, 2 * b);
+	  _gcry_md_close(hd);
+	  xfree(rawmpi);
+	  if (rc) {
+		  xfree(digest);
+		  return rc;
+	  }
+
+	  /* Compute the A value.  */
+	  reverse_buffer(hash_d, 22);  /* Only the first 176 bits.  */
+	  hash_d[0] = 0x00;
+	  hash_d[1] = hash_d[1] | 0x80;
+	  hash_d[21] &= 0xfc;
+	  memcpy(digest, hash_d, 44);
   }
 
   *r_digest = digest;
@@ -576,8 +615,10 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 	  b = 256/8;
   } else if (E->dialect == ECC_DIALECT_ED448) {
 	  b = 456/8;
+  } else if (E->dialect == ECC_DIALECT_ED168) {
+	  b = 176/8;
   } else {
-	  rc = GPG_ERR_INTERNAL; /* We only support 256 or 456 bit. */
+	  rc = GPG_ERR_INTERNAL; /* We only support 256, 456, or 176 bits. */
 	  goto leave;
   }
   gcry_mpi_t a, x, y;
@@ -618,7 +659,7 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 	  rc = _gcry_md_hash_buffers(GCRY_MD_SHA512, 0, hash_d, hvec, 1);
 	  if (rc)
 		  goto leave;
-  } else if (E->dialect == ECC_DIALECT_ED448) {
+  } else if (E->dialect == ECC_DIALECT_ED448 || E->dialect == ECC_DIALECT_ED168) {
 	  gcry_md_hd_t hd;
 	  _gcry_md_open(&hd, GCRY_MD_SHAKE256, 0);
 	  _gcry_md_write(hd, dbuf, dlen);
@@ -640,6 +681,12 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 	  hash_d[1] = hash_d[1] | 0x80;
 	  hash_d[56] &= 0xfc;
 	  _gcry_mpi_set_buffer(a, hash_d, 57, 0);
+  } else if (E->dialect == ECC_DIALECT_ED168) {
+	  reverse_buffer(hash_d, 22);  /* Only the first 176 bits.  */
+	  hash_d[0] = 0x00;
+	  hash_d[1] = hash_d[1] | 0x80;
+	  hash_d[21] &= 0xfc;
+	  _gcry_mpi_set_buffer(a, hash_d, 22, 0);
   }
   xfree (hash_d); hash_d = NULL;
   /* log_printmpi ("ecgen         a", a); */
@@ -662,7 +709,7 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
   point_init(&sk->Q);
   point_set(&sk->Q, &Q);
 
-  if (E->dialect == ECC_DIALECT_ED448) {
+  if (E->dialect == ECC_DIALECT_ED448 || E->dialect == ECC_DIALECT_ED168) { // ECC_DIALECT_ED168 ??
 	gcry_mpi_t Gx = mpi_new(0);
 	gcry_mpi_t Gy = mpi_new(0);
 	unsigned char *encpk;
@@ -948,7 +995,109 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 		  log_printhex("   e_s", rawmpi, rawmpilen);
 	  mpi_set_opaque(s, rawmpi, rawmpilen * 8);
 	  rawmpi = NULL;
-  }
+  } else if (skey->E.dialect == ECC_DIALECT_ED168) {
+	 if (b != 176 / 8) {
+		 rc = GPG_ERR_INTERNAL; /* We only support 176 bit. */
+		 goto leave;
+	 }
+
+	 rc = _gcry_ecc_eddsa_compute_h_d(&digest, skey->d, ctx);
+	 if (rc)
+		 goto leave;
+	 _gcry_mpi_set_buffer(a, digest, 22, 0);
+
+	 /* Compute the public key if it has not been supplied as optional
+	 parameter.  */
+	 if (pk)
+	 {
+		 rc = _gcry_ecc_eddsa_decodepoint(pk, ctx, &Q, &encpk, &encpklen);
+		 if (rc)
+			 goto leave;
+		 if (DBG_CIPHER)
+			 log_printhex("* e_pk", encpk, encpklen);
+		 if (!_gcry_mpi_ec_curve_point(&Q, ctx))
+		 {
+			 rc = GPG_ERR_BROKEN_PUBKEY;
+			 goto leave;
+		 }
+	 }
+	 else
+	 {
+		 _gcry_mpi_ec_mul_point(&Q, a, &skey->E.G, ctx);
+		 rc = _gcry_ecc_eddsa_encodepoint(&Q, ctx, x, y, 0, &encpk, &encpklen);
+		 if (rc)
+			 goto leave;
+		 if (DBG_CIPHER)
+			 log_printhex("  e_pk", encpk, encpklen);
+	 }
+
+	 /* Compute R.  */
+	 mbuf = mpi_get_opaque(input, &tmp);
+	 mlen = (tmp + 7) / 8;
+	 if (DBG_CIPHER)
+		 log_printhex("     m", mbuf, mlen);
+
+	 unsigned char *hash_d = NULL;
+	 hash_d = xtrymalloc_secure(2 * b);
+	 if (!hash_d) {
+		 rc = gpg_err_code_from_syserror();
+		 goto leave;
+	 }
+
+	 gcry_md_hd_t hd;
+	 _gcry_md_open(&hd, GCRY_MD_SHAKE256, 0);
+	 _gcry_md_write(hd, digest + 22, 22);
+	 _gcry_md_write(hd, mbuf, mlen);
+	 rc = _gcry_md_extract(hd, GCRY_MD_SHAKE256, hash_d, 2 * b);
+	 _gcry_md_close(hd);
+	 if (rc)
+		 goto leave;
+
+	 reverse_buffer(hash_d, 44);
+	 _gcry_mpi_set_buffer(r, hash_d, 44, 0);
+	 mpi_mod(r, r, skey->E.n);
+	 if (DBG_CIPHER)
+		 log_mpidump("     r", r);
+	 _gcry_mpi_ec_mul_point(&I, r, &skey->E.G, ctx);
+	 if (DBG_CIPHER)
+		 log_printpnt("   r", &I, 0);
+
+	 /* Convert R into affine coordinates and apply encoding.  */
+	 rc = _gcry_ecc_eddsa_encodepoint(&I, ctx, x, y, 0, &rawmpi, &rawmpilen);
+	 if (rc)
+		 goto leave;
+	 if (DBG_CIPHER)
+		 log_printhex("   e_r", rawmpi, rawmpilen);
+
+	 /* S = r + a * H(encodepoint(R) + encodepoint(pk) + m) mod n  */
+	 gcry_md_hd_t hd2;
+	 _gcry_md_open(&hd2, GCRY_MD_SHAKE256, 0);
+	 _gcry_md_write(hd2, rawmpi, rawmpilen);
+	 _gcry_md_write(hd2, encpk, encpklen);
+	 _gcry_md_write(hd2, mbuf, mlen);
+	 rc = _gcry_md_extract(hd2, GCRY_MD_SHAKE256, hash_d, 2 * b);
+	 _gcry_md_close(hd2);
+	 if (rc)
+		 goto leave;
+
+	 /* No more need for RAWMPI thus we now transfer it to R_R.  */
+	 mpi_set_opaque(r_r, rawmpi, rawmpilen * 8);
+	 rawmpi = NULL;
+
+	 reverse_buffer(hash_d, 44);
+	 if (DBG_CIPHER)
+		 log_printhex(" H(R+)", hash_d, 44);
+	 _gcry_mpi_set_buffer(s, hash_d, 44, 0);
+	 mpi_mulm(s, s, a, skey->E.n);
+	 mpi_addm(s, s, r, skey->E.n);
+	 rc = eddsa_encodempi(s, b, &rawmpi, &rawmpilen);
+	 if (rc)
+		 goto leave;
+	 if (DBG_CIPHER)
+		 log_printhex("   e_s", rawmpi, rawmpilen);
+	 mpi_set_opaque(s, rawmpi, rawmpilen * 8);
+	 rawmpi = NULL;
+ }
 
   rc = 0;
 
@@ -983,21 +1132,27 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   mpi_point_struct Q;          /* Public key.  */
   unsigned char *encpk = NULL; /* Encoded public key.  */
   unsigned int encpklen;
-  const void *mbuf, *rbuf;
-  unsigned char *tbuf = NULL;
+  mpi_point_struct R;
+  const void *mbuf;
+  unsigned char *rbuf;
   size_t mlen, rlen;
-  unsigned int tlen;
   gcry_mpi_t h, s;
-  mpi_point_struct Ia, Ib;
+  mpi_point_struct Lhs, Rhs;
+  gcry_mpi_t xn1, xn2, yn1, yn2;
 
   if (!mpi_is_opaque (input) || !mpi_is_opaque (r_in) || !mpi_is_opaque (s_in))
     return GPG_ERR_INV_DATA;
 
   point_init(&Q);
-  point_init(&Ia);
-  point_init(&Ib);
-  h = mpi_new (0);
-  s = mpi_new (0);
+  point_init(&R);
+  point_init(&Lhs);
+  point_init(&Rhs);
+  h = mpi_new(0);
+  s = mpi_new(0);
+  xn1 = mpi_new(0);
+  xn2 = mpi_new(0);
+  yn1 = mpi_new(0);
+  yn2 = mpi_new(0);
 
   ctx = _gcry_mpi_ec_p_internal_new (pkey->E.model, pkey->E.dialect, 0,
                                      pkey->E.p, pkey->E.a, pkey->E.b);
@@ -1008,8 +1163,11 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   } else if (b == 456 / 8) {
 	  if (hashalgo != GCRY_MD_SHAKE256)
 		  return GPG_ERR_DIGEST_ALGO;
+  } else if (b == 176 / 8) {
+	  if (hashalgo != GCRY_MD_SHAKE256)
+		  return GPG_ERR_DIGEST_ALGO;
   } else {
-	  return GPG_ERR_INTERNAL; /* We only support 256 or 456 bit. */
+	  return GPG_ERR_INTERNAL; /* We only support 256, 456, or 176 bits. */
   }
 
   /* Decode and check the public key.  */
@@ -1028,6 +1186,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
       rc = GPG_ERR_INV_LENGTH;
       goto leave;
     }
+
 
   /* Convert the other input parameters.  */
   mbuf = mpi_get_opaque (input, &tmp);
@@ -1085,6 +1244,27 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 	  if (DBG_CIPHER)
 		  log_printhex(" H(R+)", hash_d, 114);
 	  _gcry_mpi_set_buffer(h, hash_d, 114, 0);
+  } else if (b == 176 / 8) {
+	  unsigned char *hash_d = NULL;
+	  hash_d = xtrymalloc_secure(2 * b);
+	  if (!hash_d) {
+		  rc = gpg_err_code_from_syserror();
+		  goto leave;
+	  }
+
+	  gcry_md_hd_t hd;
+	  _gcry_md_open(&hd, GCRY_MD_SHAKE256, 0);
+	  _gcry_md_write(hd, rbuf, rlen);
+	  _gcry_md_write(hd, encpk, encpklen);
+	  _gcry_md_write(hd, mbuf, mlen);
+	  rc = _gcry_md_extract(hd, GCRY_MD_SHAKE256, hash_d, 2 * b);
+	  _gcry_md_close(hd);
+	  if (rc)
+		  goto leave;
+	  reverse_buffer(hash_d, 44);
+	  //if (DBG_CIPHER)
+		  log_printhex(" H(R+)", hash_d, 44);
+	  _gcry_mpi_set_buffer(h, hash_d, 44, 0);
   }
 
   /* According to the paper the best way for verification is:
@@ -1097,7 +1277,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
     sbuf = _gcry_mpi_get_opaque_copy (s_in, &tmp);
     slen = (tmp +7)/8;
     reverse_buffer (sbuf, slen);
-    if (DBG_CIPHER)
+    //if (DBG_CIPHER)
       log_printhex ("     s", sbuf, slen);
     _gcry_mpi_set_buffer (s, sbuf, slen, 0);
     xfree (sbuf);
@@ -1108,16 +1288,50 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
       }
   }
 
-  _gcry_mpi_ec_mul_point (&Ia, s, &pkey->E.G, ctx);
-  _gcry_mpi_ec_mul_point (&Ib, h, &Q, ctx);
-  _gcry_mpi_sub (Ib.x, ctx->p, Ib.x);
-  _gcry_mpi_ec_add_points (&Ib, &Ia, &Ib, ctx);
-  rc = _gcry_ecc_eddsa_encodepoint (&Ib, ctx, s, h, 0, &tbuf, &tlen);
+  /* Decode the R part of the signature.  */
+  reverse_buffer(rbuf, rlen);
+  int rsign = !!(rbuf[0] & 0x80);
+  rbuf[0] &= 0x7f;
+  _gcry_mpi_set_ui(R.z, 1);
+  _gcry_mpi_set_buffer(R.y, rbuf, rlen, 0);
+  rc = _gcry_ecc_eddsa_recover_x(R.x, R.y, rsign, ctx);
   if (rc)
-    goto leave;
-  if (DBG_CIPHER)
-    log_printhex("     t", tbuf, tlen);
-  if (tlen != rlen || memcmp (tbuf, rbuf, tlen))
+	  goto leave;
+
+  log_mpidump("pkey->E.n", pkey->E.n);
+  _gcry_mpi_mod(h, h, pkey->E.n);
+  log_mpidump("     h", h);
+  log_printpnt("pkey->E.G", &pkey->E.G, ctx);
+  log_printpnt("R", &R, ctx);
+  _gcry_mpi_ec_mul_point (&Lhs, s, &pkey->E.G, ctx);
+  log_printpnt("Lhs", &Lhs, ctx);
+  _gcry_mpi_ec_mul_point(&Rhs, h, &Q, ctx);
+  log_printpnt("Rhs", &Rhs, ctx);
+  _gcry_mpi_ec_add_points(&Rhs, &R, &Rhs, ctx);
+  log_printpnt("Rhs", &Rhs, ctx);
+  _gcry_mpi_ec_dup_point(&Lhs, &Lhs, ctx);
+  log_printpnt("Lhs", &Lhs, ctx);
+  _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
+  log_printpnt("Rhs", &Rhs, ctx);
+  _gcry_mpi_ec_dup_point(&Lhs, &Lhs, ctx);
+  log_printpnt("Lhs", &Lhs, ctx);
+  _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
+  log_printpnt("Rhs", &Rhs, ctx);
+
+  _gcry_mpi_mul(xn1, Lhs.x, Rhs.z);
+  _gcry_mpi_mod(xn1, xn1, ctx->p);
+  _gcry_mpi_mul(xn2, Rhs.x, Lhs.z);
+  _gcry_mpi_mod(xn2, xn2, ctx->p);
+  _gcry_mpi_mul(yn1, Lhs.y, Rhs.z);
+  _gcry_mpi_mod(yn1, yn1, ctx->p);
+  _gcry_mpi_mul(yn2, Rhs.y, Lhs.z);
+  _gcry_mpi_mod(yn2, yn2, ctx->p);
+  log_mpidump("     xn1", xn1);
+  log_mpidump("     xn2", xn2);
+  log_mpidump("     yn1", yn1);
+  log_mpidump("     yn2", yn2);
+
+  if (_gcry_mpi_cmp(xn1, xn2) || _gcry_mpi_cmp(yn1, yn2))
     {
       rc = GPG_ERR_BAD_SIGNATURE;
       goto leave;
@@ -1126,13 +1340,17 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   rc = 0;
 
  leave:
+  _gcry_mpi_release(yn2);
+  _gcry_mpi_release(yn1);
+  _gcry_mpi_release(xn2);
+  _gcry_mpi_release(xn1);
   xfree (encpk);
-  xfree (tbuf);
   _gcry_mpi_ec_free (ctx);
   _gcry_mpi_release (s);
   _gcry_mpi_release (h);
-  point_free (&Ia);
-  point_free (&Ib);
+  point_free (&Rhs);
+  point_free (&Lhs);
+  point_free (&R);
   point_free (&Q);
   return rc;
 }

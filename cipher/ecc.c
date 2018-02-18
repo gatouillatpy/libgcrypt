@@ -161,7 +161,7 @@ nist_generate_key (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
     random_level = GCRY_VERY_STRONG_RANDOM;
 
   /* Generate a secret.  */
-  if (ctx->dialect == ECC_DIALECT_ED25519 || ctx->dialect == ECC_DIALECT_ED448 || (flags & PUBKEY_FLAG_DJB_TWEAK))
+  if (ctx->dialect == ECC_DIALECT_ED25519 || ctx->dialect == ECC_DIALECT_ED448 || ctx->dialect == ECC_DIALECT_ED168 || (flags & PUBKEY_FLAG_DJB_TWEAK))
     {
       char *rndbuf;
 
@@ -179,7 +179,14 @@ nist_generate_key (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
         rndbuf[0] |= 0x40;  /* Set bit 454.   */
         rndbuf[56] &= 0xf8; /* Clear bits 2..0 so that d mod 8 == 0  */
         _gcry_mpi_set_buffer (sk->d, rndbuf, 57, 0);
-      }
+      } else if (ctx->dialect == ECC_DIALECT_ED168) {
+		sk->d = mpi_snew(176);
+		rndbuf = _gcry_random_bytes_secure(22, random_level);
+		rndbuf[0] &= 0x7f;  /* Clear bit 175. */
+		rndbuf[0] |= 0x40;  /* Set bit 174.   */
+		rndbuf[21] &= 0xf8; /* Clear bits 2..0 so that d mod 8 == 0  */
+		_gcry_mpi_set_buffer(sk->d, rndbuf, 22, 0);
+	  }
       xfree (rndbuf);
     }
   else
@@ -218,7 +225,7 @@ nist_generate_key (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
    * possibilities without any loss of security.  Note that we don't
    * do that for Ed25519 so that we do not violate the special
    * construction of the secret key.  */
-  if (r_y == NULL || E->dialect == ECC_DIALECT_ED25519 || E->dialect == ECC_DIALECT_ED448)
+  if (r_y == NULL || E->dialect == ECC_DIALECT_ED25519 || E->dialect == ECC_DIALECT_ED448 || E->dialect == ECC_DIALECT_ED168)
     point_set (&sk->Q, &Q);
   else
     {
@@ -440,7 +447,7 @@ check_secret_key (ECC_secret_key *sk, mpi_ec_t ec, int flags)
     }
 
   /* Check order of curve.  */
-  if (sk->E.dialect != ECC_DIALECT_ED25519 && sk->E.dialect != ECC_DIALECT_ED448 && !(flags & PUBKEY_FLAG_DJB_TWEAK))
+  if (sk->E.dialect != ECC_DIALECT_ED25519 && sk->E.dialect != ECC_DIALECT_ED448 && sk->E.dialect != ECC_DIALECT_ED168 && !(flags & PUBKEY_FLAG_DJB_TWEAK))
     {
       _gcry_mpi_ec_mul_point (&Q, sk->E.n, &sk->E.G, ec);
       if (mpi_cmp_ui (Q.z, 0))
@@ -633,7 +640,7 @@ ecc_generate (const gcry_sexp_t genparms, gcry_sexp_t *r_skey)
         log_fatal ("ecgen: Failed to get affine coordinates for %s\n", "G");
       base = _gcry_ecc_ec2os (Gx, Gy, sk.E.p);
     }
-  if ((sk.E.dialect == ECC_DIALECT_ED25519 || sk.E.dialect == ECC_DIALECT_ED448 || E.model == MPI_EC_MONTGOMERY)
+  if ((sk.E.dialect == ECC_DIALECT_ED25519 || sk.E.dialect == ECC_DIALECT_ED448 || sk.E.dialect == ECC_DIALECT_ED168 || E.model == MPI_EC_MONTGOMERY)
       && !(flags & PUBKEY_FLAG_NOCOMP))
     {
       unsigned char *encpk;
@@ -854,7 +861,7 @@ ecc_check_secret_key (gcry_sexp_t keyparms)
   if (mpi_q)
     {
       point_init (&sk.Q);
-      if (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448)
+      if (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448 || ec->dialect == ECC_DIALECT_ED168)
         rc = _gcry_ecc_eddsa_decodepoint (mpi_q, ec, &sk.Q, NULL, NULL);
       else if (ec->model == MPI_EC_MONTGOMERY)
         rc = _gcry_ecc_mont_decodepoint (mpi_q, ec, &sk.Q);
@@ -1162,7 +1169,7 @@ ecc_verify (gcry_sexp_t s_sig, gcry_sexp_t s_data, gcry_sexp_t s_keyparms)
   else
     {
       point_init (&pk.Q);
-      if (pk.E.dialect == ECC_DIALECT_ED25519 || pk.E.dialect == ECC_DIALECT_ED448)
+      if (pk.E.dialect == ECC_DIALECT_ED25519 || pk.E.dialect == ECC_DIALECT_ED448 || pk.E.dialect == ECC_DIALECT_ED168)
         {
           mpi_ec_t ec;
 
@@ -1996,7 +2003,7 @@ _gcry_pk_ecc_get_sexp (gcry_sexp_t *r_sexp, int mode, mpi_ec_t ec)
       goto leave;
     }
 
-  if (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448)
+  if (ec->dialect == ECC_DIALECT_ED25519 || ec->dialect == ECC_DIALECT_ED448 || ec->dialect == ECC_DIALECT_ED168)
     {
       unsigned char *encpk;
       unsigned int encpklen;
