@@ -525,12 +525,8 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
 	  digest[0] = (digest[0] & 0x7f) | 0x40;
 	  digest[31] &= 0xf8;
   } else if (b == 456 / 8) {
-	  digest = xtrycalloc_secure(2, b);
-	  if (!digest)
-		  return gpg_err_code_from_syserror();
-
 	  unsigned char *hash_d = NULL;
-	  hash_d = xtrymalloc_secure(2 * b);
+	  hash_d = xtrymalloc(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
 		  return rc;
@@ -553,13 +549,10 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
 	  hash_d[1] = hash_d[1] | 0x80;
 	  hash_d[56] &= 0xfc;
 	  memcpy(digest, hash_d, 114);
+	  xfree(hash_d);
   } else if (b == 176 / 8) {
-	  digest = xtrycalloc_secure(2, b);
-	  if (!digest)
-		  return gpg_err_code_from_syserror();
-
 	  unsigned char *hash_d = NULL;
-	  hash_d = xtrymalloc_secure(2 * b);
+	  hash_d = xtrymalloc(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
 		  return rc;
@@ -582,6 +575,7 @@ _gcry_ecc_eddsa_compute_h_d (unsigned char **r_digest,
 	  hash_d[1] = hash_d[1] | 0x80;
 	  hash_d[21] &= 0xfc;
 	  memcpy(digest, hash_d, 44);
+	  xfree(hash_d);
   }
 
   *r_digest = digest;
@@ -715,6 +709,8 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 	unsigned char *encpk;
 	unsigned int encpklen;
 	rc = _gcry_ecc_eddsa_encodepoint(&Q, ctx, Gx, Gy, 0, &encpk, &encpklen);
+    _gcry_mpi_release(Gx);
+    _gcry_mpi_release(Gy);
 	if (rc)
 		goto leave;
 
@@ -724,6 +720,7 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 	unsigned char *encpk2;
 	unsigned int encpklen2;
 	rc = _gcry_ecc_eddsa_decodepoint(mpi_q, ctx, &Q, &encpk2, &encpklen2);
+    _gcry_mpi_release(mpi_q);
 	if (rc) {
 		// Sometimes _gcry_ecc_eddsa_recover_x cannot find a solution x for the point to decode and returns GPG_ERR_INV_OBJ.
 		// Not sure if that's normal, but in this case we just repeat the keygen process.
@@ -731,7 +728,6 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
 		_gcry_mpi_release(a);
 		_gcry_mpi_release(x);
 		_gcry_mpi_release(y);
-		xfree(hash_d);
 		goto start;
 	}
   }
@@ -741,7 +737,6 @@ _gcry_ecc_eddsa_genkey (ECC_secret_key *sk, elliptic_curve_t *E, mpi_ec_t ctx,
   _gcry_mpi_release (a);
   _gcry_mpi_release (x);
   _gcry_mpi_release (y);
-  xfree(hash_d);
   return rc;
 }
 
@@ -780,6 +775,7 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
   mpi_point_struct I;          /* Intermediate value.  */
   mpi_point_struct Q;          /* Public key.  */
   gcry_mpi_t a, x, y, r;
+  unsigned char *hash_d = NULL;
 
   memset (hvec, 0, sizeof hvec);
 
@@ -935,7 +931,6 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	  if (DBG_CIPHER)
 		  log_printhex("     m", mbuf, mlen);
 
-	  unsigned char *hash_d = NULL;
 	  hash_d = xtrymalloc_secure(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
@@ -1037,7 +1032,6 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 	 if (DBG_CIPHER)
 		 log_printhex("     m", mbuf, mlen);
 
-	 unsigned char *hash_d = NULL;
 	 hash_d = xtrymalloc_secure(2 * b);
 	 if (!hash_d) {
 		 rc = gpg_err_code_from_syserror();
@@ -1101,7 +1095,8 @@ _gcry_ecc_eddsa_sign (gcry_mpi_t input, ECC_secret_key *skey,
 
   rc = 0;
 
- leave:
+leave:
+  xfree (hash_d);
   _gcry_mpi_release (a);
   _gcry_mpi_release (x);
   _gcry_mpi_release (y);
@@ -1139,6 +1134,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   gcry_mpi_t h, s;
   mpi_point_struct Lhs, Rhs;
   gcry_mpi_t xn1, xn2, yn1, yn2;
+  unsigned char *hash_d = NULL;
 
   if (!mpi_is_opaque (input) || !mpi_is_opaque (r_in) || !mpi_is_opaque (s_in))
     return GPG_ERR_INV_DATA;
@@ -1224,7 +1220,6 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 		log_printhex (" H(R+)", digest, 64);
 	  _gcry_mpi_set_buffer (h, digest, 64, 0);
   } else if (b == 456 / 8) {
-	  unsigned char *hash_d = NULL;
 	  hash_d = xtrymalloc_secure(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
@@ -1245,7 +1240,6 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 		  log_printhex(" H(R+)", hash_d, 114);
 	  _gcry_mpi_set_buffer(h, hash_d, 114, 0);
   } else if (b == 176 / 8) {
-	  unsigned char *hash_d = NULL;
 	  hash_d = xtrymalloc_secure(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
@@ -1324,7 +1318,8 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 
   rc = 0;
 
- leave:
+leave:
+  xfree(hash_d);
   _gcry_mpi_release(yn2);
   _gcry_mpi_release(yn1);
   _gcry_mpi_release(xn2);
