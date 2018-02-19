@@ -1262,7 +1262,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 	  if (rc)
 		  goto leave;
 	  reverse_buffer(hash_d, 44);
-	  //if (DBG_CIPHER)
+	  if (DBG_CIPHER)
 		  log_printhex(" H(R+)", hash_d, 44);
 	  _gcry_mpi_set_buffer(h, hash_d, 44, 0);
   }
@@ -1277,7 +1277,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
     sbuf = _gcry_mpi_get_opaque_copy (s_in, &tmp);
     slen = (tmp +7)/8;
     reverse_buffer (sbuf, slen);
-    //if (DBG_CIPHER)
+    if (DBG_CIPHER)
       log_printhex ("     s", sbuf, slen);
     _gcry_mpi_set_buffer (s, sbuf, slen, 0);
     xfree (sbuf);
@@ -1298,25 +1298,14 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   if (rc)
 	  goto leave;
 
-  log_mpidump("pkey->E.n", pkey->E.n);
   _gcry_mpi_mod(h, h, pkey->E.n);
-  log_mpidump("     h", h);
-  log_printpnt("pkey->E.G", &pkey->E.G, ctx);
-  log_printpnt("R", &R, ctx);
   _gcry_mpi_ec_mul_point (&Lhs, s, &pkey->E.G, ctx);
-  log_printpnt("Lhs", &Lhs, ctx);
   _gcry_mpi_ec_mul_point(&Rhs, h, &Q, ctx);
-  log_printpnt("Rhs", &Rhs, ctx);
   _gcry_mpi_ec_add_points(&Rhs, &R, &Rhs, ctx);
-  log_printpnt("Rhs", &Rhs, ctx);
   _gcry_mpi_ec_dup_point(&Lhs, &Lhs, ctx);
-  log_printpnt("Lhs", &Lhs, ctx);
   _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
-  log_printpnt("Rhs", &Rhs, ctx);
   _gcry_mpi_ec_dup_point(&Lhs, &Lhs, ctx);
-  log_printpnt("Lhs", &Lhs, ctx);
   _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
-  log_printpnt("Rhs", &Rhs, ctx);
 
   _gcry_mpi_mul(xn1, Lhs.x, Rhs.z);
   _gcry_mpi_mod(xn1, xn1, ctx->p);
@@ -1326,10 +1315,6 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   _gcry_mpi_mod(yn1, yn1, ctx->p);
   _gcry_mpi_mul(yn2, Rhs.y, Lhs.z);
   _gcry_mpi_mod(yn2, yn2, ctx->p);
-  log_mpidump("     xn1", xn1);
-  log_mpidump("     xn2", xn2);
-  log_mpidump("     yn1", yn1);
-  log_mpidump("     yn2", yn2);
 
   if (_gcry_mpi_cmp(xn1, xn2) || _gcry_mpi_cmp(yn1, yn2))
     {
