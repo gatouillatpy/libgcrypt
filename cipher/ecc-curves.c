@@ -43,7 +43,7 @@ static const struct
     { "Curve25519", "1.3.6.1.4.1.3029.1.5.1" },
     { "Ed25519", "1.3.6.1.4.1.11591.15.1" },
     { "Ed448", "Ed448-Goldilocks" },		 /* https://eprint.iacr.org/2015/625.pdf */
-	{ "Ed168", "Telex" },					 /* https://www.freehaven.net/anonbib/cache/usenix11-telex.pdf */
+	{ "E168", "Telex" },					 /* https://www.freehaven.net/anonbib/cache/usenix11-telex.pdf */
 
     { "NIST P-192", "1.2.840.10045.3.1.1" }, /* X9.62 OID  */
     { "NIST P-192", "prime192v1" },          /* X9.62 name.  */
@@ -121,7 +121,7 @@ static const ecc_domain_parms_t domain_parms[] =
   {
     {
       /* (-x^2 + y^2 = 1 + d*x^2y^2) */
-      "Ed168", 176, 0,
+      "E168", 176, 0,
       MPI_EC_EDWARDS, ECC_DIALECT_ED168,
       "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFF",
       "0x01",

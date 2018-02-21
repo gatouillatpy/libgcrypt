@@ -1143,28 +1143,35 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   point_init(&R);
   point_init(&Lhs);
   point_init(&Rhs);
+
+  ctx = _gcry_mpi_ec_p_internal_new (pkey->E.model, pkey->E.dialect, 0,
+                                     pkey->E.p, pkey->E.a, pkey->E.b);
+  b = ctx->nbits/8;
+  if (pkey->E.dialect == ECC_DIALECT_ED25519) {
+	  if (b != 256 / 8)
+		  return GPG_ERR_INTERNAL; /* We only support 256 bit. */
+	  if (hashalgo != GCRY_MD_SHA512)
+		  return GPG_ERR_DIGEST_ALGO;
+  } else if (pkey->E.dialect == ECC_DIALECT_ED448) {
+	  if (b != 456 / 8)
+		  return GPG_ERR_INTERNAL; /* We only support 456 bit. */
+	  if (hashalgo != GCRY_MD_SHAKE256)
+		  return GPG_ERR_DIGEST_ALGO;
+  } else if (pkey->E.dialect == ECC_DIALECT_ED168) {
+	  if (b != 176 / 8)
+		  return GPG_ERR_INTERNAL; /* We only support 176 bit. */
+	  if (hashalgo != GCRY_MD_SHAKE256)
+		  return GPG_ERR_DIGEST_ALGO;
+  } else {
+	  return GPG_ERR_INTERNAL; /* We don't support any other dialect. */
+  }
+
   h = mpi_new(0);
   s = mpi_new(0);
   xn1 = mpi_new(0);
   xn2 = mpi_new(0);
   yn1 = mpi_new(0);
   yn2 = mpi_new(0);
-
-  ctx = _gcry_mpi_ec_p_internal_new (pkey->E.model, pkey->E.dialect, 0,
-                                     pkey->E.p, pkey->E.a, pkey->E.b);
-  b = ctx->nbits/8;
-  if (b == 256 / 8) {
-	  if (hashalgo != GCRY_MD_SHA512)
-		  return GPG_ERR_DIGEST_ALGO;
-  } else if (b == 456 / 8) {
-	  if (hashalgo != GCRY_MD_SHAKE256)
-		  return GPG_ERR_DIGEST_ALGO;
-  } else if (b == 176 / 8) {
-	  if (hashalgo != GCRY_MD_SHAKE256)
-		  return GPG_ERR_DIGEST_ALGO;
-  } else {
-	  return GPG_ERR_INTERNAL; /* We only support 256, 456, or 176 bits. */
-  }
 
   /* Decode and check the public key.  */
   rc = _gcry_ecc_eddsa_decodepoint (pk, ctx, &Q, &encpk, &encpklen);
@@ -1200,7 +1207,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
     }
 
   /* h = H(encodepoint(R) + encodepoint(pk) + m)  */
-  if (b == 256 / 8) {
+  if (pkey->E.dialect == ECC_DIALECT_ED25519) {
 	  unsigned char digest[64];
 	  gcry_buffer_t hvec[3];
 	  hvec[0].data = (char*)rbuf;
@@ -1219,7 +1226,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 	  if (DBG_CIPHER)
 		log_printhex (" H(R+)", digest, 64);
 	  _gcry_mpi_set_buffer (h, digest, 64, 0);
-  } else if (b == 456 / 8) {
+  } else if (pkey->E.dialect == ECC_DIALECT_ED448) {
 	  hash_d = xtrymalloc_secure(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
@@ -1239,7 +1246,7 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
 	  if (DBG_CIPHER)
 		  log_printhex(" H(R+)", hash_d, 114);
 	  _gcry_mpi_set_buffer(h, hash_d, 114, 0);
-  } else if (b == 176 / 8) {
+  } else if (pkey->E.dialect == ECC_DIALECT_ED168) {
 	  hash_d = xtrymalloc_secure(2 * b);
 	  if (!hash_d) {
 		  rc = gpg_err_code_from_syserror();
@@ -1300,6 +1307,12 @@ _gcry_ecc_eddsa_verify (gcry_mpi_t input, ECC_public_key *pkey,
   _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
   _gcry_mpi_ec_dup_point(&Lhs, &Lhs, ctx);
   _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
+  if (pkey->E.dialect == ECC_DIALECT_ED25519) {
+	  // The cofactor for ED25519 is 3 so we double one more time.
+	  // TODO: Make this more generic.
+	  _gcry_mpi_ec_dup_point(&Lhs, &Lhs, ctx);
+	  _gcry_mpi_ec_dup_point(&Rhs, &Rhs, ctx);
+  }
 
   _gcry_mpi_mul(xn1, Lhs.x, Rhs.z);
   _gcry_mpi_mod(xn1, xn1, ctx->p);
