@@ -40,7 +40,7 @@
 void
 _gcry_mpi_point_log (const char *name, mpi_point_t point, mpi_ec_t ctx)
 {
-  gcry_mpi_t x, y;
+	gcry_mpi_t x, y;
   char buf[200];
 
   if (!point)
